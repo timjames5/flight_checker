@@ -45,8 +45,11 @@ The workflow needs this to commit `data/prices.db`.
 
 ### 4. Do a test run
 
-Go to **Actions → Flight price tracker → Run workflow**. Tick **force_email** to get a digest
-straight away, whatever time it is.
+Go to **Actions → Flight price tracker → Run workflow**. The options are:
+
+- **dry_run:** prints the email in the run log instead of sending it, and doesn't touch the database. Use this first to check your Ignav key and see real prices.
+- **force_email:** sends a digest straight away, whatever time it is.
+- **slot:** picks morning or evening rules. `auto` decides from the current UK time.
 
 ## Running locally
 

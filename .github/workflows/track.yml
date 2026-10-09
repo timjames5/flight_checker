@@ -1,0 +1,90 @@
+name: Flight price tracker
+
+on:
+  schedule:
+    # GitHub cron is UTC. Each UK run time has two triggers, one for GMT and
+    # one for BST; the tracker works out which one is 07:00 / 19:00 in London
+    # that day and the other exits immediately.
+    - cron: "0 6 * * *"   # 07:00 BST
+    - cron: "0 7 * * *"   # 07:00 GMT
+    - cron: "0 18 * * *"  # 19:00 BST
+    - cron: "0 19 * * *"  # 19:00 GMT
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "Which run's rules to apply (auto = by current UK time)"
+        type: choice
+        options: [auto, morning, evening]
+        default: auto
+      force_email:
+        description: "Send the digest even if the alert rules wouldn't"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Print the email in the log instead of sending it (no database update)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: flight-tracker
+  cancel-in-progress: false
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check prices
+        id: track
+        env:
+          IGNAV_API_KEY: ${{ secrets.IGNAV_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          SLOT: ${{ inputs.slot }}
+          FORCE_EMAIL: ${{ inputs.force_email }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=()
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            args+=(--scheduled-cron "$SCHEDULE")
+          else
+            args+=(--slot "${SLOT:-auto}")
+          fi
+          [ "$FORCE_EMAIL" = "true" ] && args+=(--force-email)
+          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          python -m tracker "${args[@]}"
+
+      # Runs even when the tracker exits non-zero after sending a problem
+      # email, so the failed searches are still recorded.
+      - name: Commit price history
+        if: always() && steps.track.outcome != 'skipped'
+        run: |
+          if [ -z "$(git status --porcelain -- data/prices.db)" ]; then
+            echo "No database changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/prices.db
+          git commit -m "Record flight prices $(date -u +%Y-%m-%dT%H:%MZ)"
+          for attempt in 1 2 3; do
+            git pull --rebase --quiet && git push && exit 0
+            sleep $((attempt * 5))
+          done
+          echo "Could not push the database after 3 attempts." >&2
+          exit 1
