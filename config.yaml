@@ -1,0 +1,41 @@
+# Flight price tracker configuration.
+# Edit this file to change the trip or alert rules. No code changes needed.
+
+trip:
+  origin: LHR
+  destination: ATL
+  # Every outbound date is paired with every return date (3 x 2 = 6 round trips).
+  # Keep dates quoted so YAML treats them as strings.
+  outbound_dates: ["2027-08-16", "2027-08-17", "2027-08-18"]
+  return_dates: ["2027-08-31", "2027-09-01"]
+  adults: 3
+  children: 1          # ages 2-11 count as children for Ignav
+  cabin_class: economy # economy | premium_economy | business | first
+  market: GB           # GB market returns prices in GBP
+  currency: GBP
+
+alerts:
+  # Evening run emails only if a nonstop price drops by at least this much
+  # since the previous run, or hits a new all-time low.
+  evening_drop_threshold: 25
+  # Show a connecting option only if it beats the nonstop by at least this much.
+  connecting_min_saving: 150
+  # Add the price chart once data covers at least this many distinct days.
+  chart_min_days: 3
+
+schedule:
+  timezone: Europe/London
+  morning_hour: 7   # always sends the digest
+  evening_hour: 19  # sends only on a price drop or new low
+
+email:
+  from: "Flight Tracker <onboarding@resend.dev>"
+
+storage:
+  database: data/prices.db
+
+api:
+  base_url: https://ignav.com/api
+  timeout_seconds: 60
+  max_attempts: 4          # total tries per request, including the first
+  backoff_base_seconds: 2  # waits 2s, 4s, 8s between tries (plus jitter)
