@@ -1,6 +1,6 @@
 # Flight price tracker: LHR → ATL, August 2027
 
-Checks round-trip economy fares for 3 adults + 1 child twice a day and emails you about them.
+Checks round-trip economy and premium economy fares for 3 adults + 1 child twice a day and emails you about them.
 
 - **Dates:** every combination of outbound 16, 17 or 18 Aug 2027 and return 31 Aug or 1 Sep 2027 (6 round trips).
 - **What it records:** for each date pair, the cheapest option where both legs are nonstop, and the cheapest option with any number of stops. It stores the airline, flight numbers, local departure/arrival times and a booking link for each.
@@ -86,15 +86,15 @@ pytest
 
 Edit `config.yaml`, where you can change:
 
-- airports, dates and passengers
+- airports, dates, passengers and cabin classes (`cabin_classes`)
 - the £25 evening drop threshold
 - the £150 connecting-flight margin
 - how many days of data the chart needs
 - the UK run hours
 
-The six date pairs are every outbound date crossed with every return date, so adding dates adds searches.
+The six date pairs are every outbound date crossed with every return date, and each pair is searched once per cabin, so adding dates or cabins adds searches. Each cabin gets its own price history, alerts and table in the email, and its own line on the chart.
 
-Each run makes 12 searches (a nonstop-only search and an any-stops search per date pair), plus up to 12 booking-link lookups. That's at most about 1,450 requests a month at two runs a day: roughly $1 a month after the free 1,000.
+Each run makes 24 searches (a nonstop-only search and an any-stops search per date pair, for each of the two cabins), plus up to 24 booking-link lookups. That's at most about 2,900 requests a month at two runs a day, about 1,900 over the free 1,000.
 
 ## How the UK-time schedule works
 

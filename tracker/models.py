@@ -43,10 +43,11 @@ class FlightOption:
 
 @dataclass
 class ComboResult:
-    """Search outcome for one outbound/return date pair."""
+    """Search outcome for one outbound/return date pair in one cabin."""
 
     depart: dt.date
     ret: dt.date
+    cabin: str = "economy"
     nonstop: FlightOption | None = None  # (a) cheapest with both legs nonstop
     overall: FlightOption | None = None  # (b) cheapest regardless of stops
     errors: list[str] = field(default_factory=list)
@@ -54,5 +55,5 @@ class ComboResult:
     cache_hit: bool | None = None
 
     @property
-    def key(self) -> tuple[str, str]:
-        return (self.depart.isoformat(), self.ret.isoformat())
+    def key(self) -> tuple[str, str, str]:
+        return (self.cabin, self.depart.isoformat(), self.ret.isoformat())

@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS quotes (
     run_at_utc     TEXT NOT NULL,
     depart_date    TEXT NOT NULL,
     return_date    TEXT NOT NULL,
-    kind           TEXT NOT NULL CHECK (kind IN ('nonstop', 'overall')),
+    cabin_class    TEXT NOT NULL DEFAULT 'economy',
+    kind          TEXT NOT NULL CHECK (kind IN ('nonstop', 'overall')),
     price          REAL,
     currency       TEXT,
     price_status   TEXT,
@@ -42,9 +43,13 @@ CREATE TABLE IF NOT EXISTS quotes (
     cache_hit      INTEGER,
     error          TEXT
 );
+"""
 
-CREATE INDEX IF NOT EXISTS quotes_combo
-    ON quotes (kind, depart_date, return_date, run_at_utc);
+# Created after _migrate so the cabin_class column exists on older databases.
+INDEXES = """
+DROP INDEX IF EXISTS quotes_combo;
+CREATE INDEX IF NOT EXISTS quotes_cabin_combo
+    ON quotes (kind, cabin_class, depart_date, return_date, run_at_utc);
 """
 
 
@@ -57,7 +62,17 @@ def connect(path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _migrate(conn)
+    conn.executescript(INDEXES)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add cabin_class to databases from before multi-cabin tracking (all economy)."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(quotes)")}
+    if "cabin_class" not in columns:
+        with conn:
+            conn.execute("ALTER TABLE quotes ADD COLUMN cabin_class TEXT NOT NULL DEFAULT 'economy'")
 
 
 def save_run(conn: sqlite3.Connection, run_at: dt.datetime, slot: str,
@@ -80,7 +95,7 @@ def _insert_quote(conn, run_id, ts, r: ComboResult, kind: str,
     row = {
         "run_id": run_id, "run_at_utc": ts,
         "depart_date": r.depart.isoformat(), "return_date": r.ret.isoformat(),
-        "kind": kind, "observed_at": r.observed_at,
+        "cabin_class": r.cabin, "kind": kind, "observed_at": r.observed_at,
         "cache_hit": None if r.cache_hit is None else int(r.cache_hit),
         "error": error,
     }
@@ -101,16 +116,17 @@ def _insert_quote(conn, run_id, ts, r: ComboResult, kind: str,
     conn.execute(f"INSERT INTO quotes ({cols}) VALUES ({marks})", list(row.values()))
 
 
-def nonstop_history(conn: sqlite3.Connection) -> dict[tuple[str, str], list[tuple[str, float]]]:
-    """All recorded nonstop prices per (depart, return), oldest first."""
-    history: dict[tuple[str, str], list[tuple[str, float]]] = {}
+def nonstop_history(conn: sqlite3.Connection) -> dict[tuple[str, str, str], list[tuple[str, float]]]:
+    """All recorded nonstop prices per (cabin, depart, return), oldest first."""
+    history: dict[tuple[str, str, str], list[tuple[str, float]]] = {}
     rows = conn.execute(
-        """SELECT depart_date, return_date, run_at_utc, price FROM quotes
+        """SELECT cabin_class, depart_date, return_date, run_at_utc, price FROM quotes
            WHERE kind = 'nonstop' AND price IS NOT NULL
            ORDER BY run_at_utc, id"""
     )
     for row in rows:
-        history.setdefault((row["depart_date"], row["return_date"]), []).append(
+        key = (row["cabin_class"], row["depart_date"], row["return_date"])
+        history.setdefault(key, []).append(
             (row["run_at_utc"], row["price"])
         )
     return history

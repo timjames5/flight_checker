@@ -38,7 +38,8 @@ class IgnavClient:
         except ValueError as exc:
             raise ApiError(f"invalid JSON from {path}: {exc}") from exc
 
-    def round_trip(self, depart: dt.date, ret: dt.date, max_stops: int | None) -> dict:
+    def round_trip(self, depart: dt.date, ret: dt.date, max_stops: int | None,
+                   cabin: str = "economy") -> dict:
         body = {
             "origin": self.cfg.origin,
             "destination": self.cfg.destination,
@@ -46,7 +47,7 @@ class IgnavClient:
             "return_date": ret.isoformat(),
             "adults": self.cfg.adults,
             "children": self.cfg.children,
-            "cabin_class": self.cfg.cabin_class,
+            "cabin_class": cabin,
             "market": self.cfg.market,
         }
         if max_stops is not None:
@@ -57,20 +58,21 @@ class IgnavClient:
         return self._post("/fares/booking-links", {"ignav_id": ignav_id})
 
 
-def search_combo(client, cfg: Config, depart: dt.date, ret: dt.date) -> ComboResult:
-    """Search one date pair and record the cheapest nonstop and overall options.
+def search_combo(client, cfg: Config, depart: dt.date, ret: dt.date,
+                 cabin: str = "economy") -> ComboResult:
+    """Search one date pair in one cabin and record the cheapest nonstop and overall options.
 
     Two searches run: one with max_stops=0, one without a stops filter. Ignav
     doesn't return every combination, so the unfiltered search can miss
     nonstop fares; pooling both and filtering on segment counts ourselves
     gives the most reliable answer to both questions.
     """
-    result = ComboResult(depart=depart, ret=ret)
+    result = ComboResult(depart=depart, ret=ret, cabin=cabin)
     options: list[FlightOption] = []
 
     for label, max_stops in (("nonstop search", 0), ("any-stops search", None)):
         try:
-            data = client.round_trip(depart, ret, max_stops)
+            data = client.round_trip(depart, ret, max_stops, cabin)
         except ApiError as exc:
             result.errors.append(f"{label}: {exc}")
             continue
@@ -99,7 +101,8 @@ def search_combo(client, cfg: Config, depart: dt.date, ret: dt.date) -> ComboRes
 
 def search_all(client, cfg: Config) -> list[ComboResult]:
     results = []
-    for depart, ret in cfg.combos:
-        log.info("searching %s -> %s", depart, ret)
-        results.append(search_combo(client, cfg, depart, ret))
+    for cabin in cfg.cabin_classes:
+        for depart, ret in cfg.combos:
+            log.info("searching %s -> %s (%s)", depart, ret, cabin)
+            results.append(search_combo(client, cfg, depart, ret, cabin))
     return results

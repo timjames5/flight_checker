@@ -11,7 +11,7 @@ from pathlib import Path
 
 from tracker import analysis, storage
 from tracker.chart import price_chart_png
-from tracker.config import load_config
+from tracker.config import cabin_name, load_config
 from tracker.emailer import render_digest, render_problem, send_email
 from tracker.http import ApiError
 from tracker.ignav import IgnavClient, search_all
@@ -50,13 +50,14 @@ def _now(arg: str | None) -> dt.datetime:
 
 
 def _failed_results(cfg, message: str) -> list[ComboResult]:
-    return [ComboResult(depart=d, ret=r, errors=[message]) for d, r in cfg.combos]
+    return [ComboResult(depart=d, ret=r, cabin=c, errors=[message])
+            for c in cfg.cabin_classes for d, r in cfg.combos]
 
 
 def _print_summary(statuses: list[analysis.ComboStatus]) -> None:
     for s in statuses:
         r = s.result
-        line = f"{analysis.combo_label(r.depart, r.ret)}  nonstop={s.current}  "
+        line = f"{analysis.result_label(r)}  nonstop={s.current}  "
         line += f"overall={r.overall.price if r.overall else None}"
         if r.overall and not r.overall.is_nonstop:
             line += f" ({r.overall.stops_label})"
@@ -123,9 +124,9 @@ def main(argv=None) -> int:
         for r in results:
             if r.nonstop:
                 merged.setdefault(r.key, []).append((storage.utc_iso(now), r.nonstop.price))
-        series = analysis.chart_series(merged, cfg.timezone)
+        series = analysis.chart_series(merged, cfg.timezone, cfg.cabin_classes)
         if analysis.distinct_days(series) >= cfg.chart_min_days:
-            chart_png = price_chart_png(series)
+            chart_png = price_chart_png({cabin_name(c): s for c, s in series.items()})
         email = render_digest(cfg, statuses, run_at=now, slot=slot, reasons=reasons, chart_png=chart_png)
 
     if args.dry_run:

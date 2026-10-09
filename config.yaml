@@ -10,7 +10,9 @@ trip:
   return_dates: ["2027-08-31", "2027-09-01"]
   adults: 3
   children: 1          # ages 2-11 count as children for Ignav
-  cabin_class: economy # economy | premium_economy | business | first
+  # Each cabin is searched and tracked separately, so every cabin added
+  # multiplies the searches per run. Options: economy | premium_economy | business | first
+  cabin_classes: [economy, premium_economy]
   market: GB           # GB market returns prices in GBP
   currency: GBP
 

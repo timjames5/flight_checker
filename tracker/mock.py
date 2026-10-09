@@ -17,6 +17,9 @@ NONSTOPS = [
     ("British Airways", "BA", "227", "15:05", "19:55", "226", "21:40", "10:55+1"),
 ]
 
+# Typical starting fare per cabin for the whole party.
+CABIN_BASE = {"economy": 4150, "premium_economy": 7300, "business": 16500, "first": 30000}
+
 
 def _noise(*parts) -> float:
     """Deterministic value in [0, 1) from the given parts."""
@@ -61,25 +64,27 @@ class MockIgnavClient:
         wobble = (_noise(self.tick, *key) - 0.5) * 70
         return round(base + drift + wobble, 2)
 
-    def round_trip(self, depart: dt.date, ret: dt.date, max_stops: int | None) -> dict:
+    def round_trip(self, depart: dt.date, ret: dt.date, max_stops: int | None,
+                   cabin: str = "economy") -> dict:
+        base = CABIN_BASE.get(cabin, 4150)
         combo_bias = (depart.day - 16) * 55 + (0 if ret.month == 8 else 40)
         itineraries = []
         for name, code, out_no, od, oa, in_no, idp, ia in NONSTOPS:
-            price = self._price(4150 + combo_bias + len(name) * 9, depart, ret, code)
+            price = self._price(base + combo_bias + len(name) * 9, depart, ret, cabin, code)
             itineraries.append({
                 "price": {"amount": price, "currency": "GBP", "status": "verified"},
                 "outbound": {"carrier": name, "duration_minutes": 595, "segments": [
                     _segment(code, name, out_no, "LHR", "ATL", depart, od, oa, 595)]},
                 "inbound": {"carrier": name, "duration_minutes": 520, "segments": [
                     _segment(code, name, in_no, "ATL", "LHR", ret, idp, ia, 520)]},
-                "cabin_class": "economy",
+                "cabin_class": cabin,
                 "requires_self_transfer": False,
-                "ignav_id": hashlib.md5(f"{depart}{ret}{code}".encode()).hexdigest(),
+                "ignav_id": hashlib.md5(f"{depart}{ret}{cabin}{code}".encode()).hexdigest(),
             })
         if max_stops != 0:
             # A one-stop via New York; much cheaper on the 18 Aug / 31 Aug pair.
             saving = 420 if (depart.day, ret.day) == (18, 31) else 40
-            price = self._price(4150 + combo_bias - saving, depart, ret, "AA")
+            price = self._price(base + combo_bias - saving, depart, ret, cabin, "AA")
             itineraries.append({
                 "price": {"amount": price, "currency": "GBP", "status": "verified"},
                 "outbound": {"carrier": "American Airlines", "duration_minutes": 760, "segments": [
@@ -88,9 +93,9 @@ class MockIgnavClient:
                 "inbound": {"carrier": "American Airlines", "duration_minutes": 745, "segments": [
                     _segment("AA", "American Airlines", "1880", "ATL", "JFK", ret, "14:10", "16:35", 145),
                     _segment("AA", "American Airlines", "100", "JFK", "LHR", ret, "18:30", "06:40+1", 430)]},
-                "cabin_class": "economy",
+                "cabin_class": cabin,
                 "requires_self_transfer": False,
-                "ignav_id": hashlib.md5(f"{depart}{ret}AA".encode()).hexdigest(),
+                "ignav_id": hashlib.md5(f"{depart}{ret}{cabin}AA".encode()).hexdigest(),
             })
         return {
             "origin": "LHR",

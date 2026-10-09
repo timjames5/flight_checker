@@ -10,8 +10,9 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from tracker.analysis import ComboStatus, best_nonstop, combo_label, connecting_worth_listing
-from tracker.config import Config
+from tracker.analysis import (ComboStatus, best_nonstop, combo_label, connecting_worth_listing,
+                              result_label)
+from tracker.config import Config, cabin_name
 from tracker.http import request_with_retry
 from tracker.models import ComboResult, FlightOption
 
@@ -114,7 +115,7 @@ def _shell(cfg: Config, title: str, body: str, footer: str) -> str:
        style="max-width:640px;background:{SURFACE};border-radius:10px;border:1px solid {RULE}">
 <tr><td style="padding:24px 24px 8px">
   <div style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:{INK_2}">
-    {escape(cfg.origin)} → {escape(cfg.destination)} · {escape(cfg.passenger_summary)} · {escape(cfg.cabin_class)}
+    {escape(cfg.origin)} → {escape(cfg.destination)} · {escape(cfg.passenger_summary)} · {escape(cfg.cabin_summary)}
   </div>
 </td></tr>
 {body}
@@ -126,37 +127,23 @@ def _shell(cfg: Config, title: str, body: str, footer: str) -> str:
 
 # ---------------------------------------------------------------- digest
 
-def render_digest(cfg: Config, statuses: list[ComboStatus], *, run_at: dt.datetime,
-                  slot: str, reasons: list[str], chart_png: bytes | None) -> Email:
-    best = best_nonstop(statuses)
-    assert best is not None and best.result.nonstop is not None
-    opt = best.result.nonstop
-    label = combo_label(best.result.depart, best.result.ret)
-    local = run_at.astimezone(ZoneInfo(cfg.timezone))
-
-    tag = "PRICE DROP" if reasons else ("Daily digest" if slot == "morning" else "Update")
-    subject = f"{tag}: {cfg.origin}→{cfg.destination} nonstop from {money(opt.price)} ({label})"
-
-    connecting = [
-        s for s in statuses
-        if connecting_worth_listing(s.result.nonstop, s.result.overall, cfg.connecting_min_saving)
-    ]
-    errors = [(s.result, e) for s in statuses for e in s.result.errors]
-
-    # ---- HTML
-    out_line, back_line = itinerary_lines(opt)
-    alert_html = ""
-    if reasons:
-        items = "".join(f"<li>{escape(r)}</li>" for r in reasons)
-        alert_html = f"""<tr><td style="padding:8px 24px 0">
-  <div style="border-left:4px solid {DOWN};background:#eef7f0;padding:10px 14px;border-radius:4px;font-size:14px">
-    <strong>Price drop</strong><ul style="margin:6px 0 0;padding-left:18px">{items}</ul></div>
+def _cabin_section_html(cabin: str, statuses: list[ComboStatus], best: ComboStatus | None,
+                        multi: bool) -> str:
+    """Best nonstop for one cabin, then every date pair's nonstop price in that cabin."""
+    name = cabin_name(cabin)
+    if best is None:
+        hero = f"""<tr><td style="padding:8px 24px 20px">
+  <div style="font-size:16px;font-weight:700">{escape(name)}</div>
+  <div style="font-size:14px;color:{UP};margin-top:4px">No nonstop round trips found in this cabin this time.</div>
 </td></tr>"""
-
-    hero = f"""<tr><td style="padding:8px 24px 20px">
-  <div style="font-size:14px;color:{INK_2}">Best nonstop round trip right now</div>
+    else:
+        opt = best.result.nonstop
+        out_line, back_line = itinerary_lines(opt)
+        heading = f"Best {name.lower()} nonstop right now" if multi else "Best nonstop round trip right now"
+        hero = f"""<tr><td style="padding:8px 24px 20px">
+  <div style="font-size:14px;color:{INK_2}">{escape(heading)}</div>
   <div style="font-size:34px;font-weight:700;line-height:1.2;margin:4px 0 2px">{money(opt.price)}</div>
-  <div style="font-size:16px;font-weight:600">{escape(label)} 2027</div>
+  <div style="font-size:16px;font-weight:600">{escape(combo_label(best.result.depart, best.result.ret))} 2027</div>
   <div style="font-size:14px;color:{INK_2};margin:6px 0 14px;line-height:1.5">
     {escape(opt.airline)}<br>{escape(out_line)}<br>{escape(back_line)}</div>
   {_button(opt.booking_url)}
@@ -184,8 +171,9 @@ def render_digest(cfg: Config, statuses: list[ComboStatus], *, run_at: dt.dateti
   <td style="{td}text-align:right;white-space:nowrap">{money(s.all_time_low)}{new_low}</td>
 </tr>""")
     th = f"padding:6px 8px;font-size:11px;font-weight:600;color:{INK_2};text-transform:uppercase;letter-spacing:.04em"
+    title = f"{name} · all dates · nonstop prices" if multi else "All dates · nonstop prices"
     table = f"""<tr><td style="padding:0 16px 20px">
-  <div style="font-size:16px;font-weight:700;padding:0 8px 8px">All dates · nonstop prices</div>
+  <div style="font-size:16px;font-weight:700;padding:0 8px 8px">{escape(title)}</div>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
     <tr><th align="left" style="{th};padding-left:12px">Dates</th><th align="right" style="{th}">Now</th>
         <th align="right" style="{th}">Since last</th><th align="right" style="{th}">Since start</th>
@@ -193,6 +181,82 @@ def render_digest(cfg: Config, statuses: list[ComboStatus], *, run_at: dt.dateti
     {''.join(rows)}
   </table>
 </td></tr>"""
+    return hero + table
+
+
+def _cabin_section_text(cabin: str, statuses: list[ComboStatus], best: ComboStatus | None,
+                        multi: bool) -> list[str]:
+    name = cabin_name(cabin)
+    if best is None:
+        lines = [f"{name.upper()}: no nonstop round trips found this time", ""]
+    else:
+        opt = best.result.nonstop
+        out_line, back_line = itinerary_lines(opt)
+        heading = f"BEST {name.upper()} NONSTOP" if multi else "BEST NONSTOP RIGHT NOW"
+        lines = [
+            f"{heading}: {money(opt.price)}  {combo_label(best.result.depart, best.result.ret)} 2027",
+            f"  {opt.airline}",
+            f"  {out_line}",
+            f"  {back_line}",
+            f"  Book: {opt.booking_url or 'no booking link returned'}",
+            "",
+        ]
+    lines += [
+        f"ALL DATES ({name.lower()} nonstop)" if multi else "ALL DATES (nonstop)",
+        f"  {'Dates':<24}{'Now':>9}{'Since last':>13}{'Since start':>13}{'All-time low':>15}",
+    ]
+    for s in statuses:
+        mark = " *" if s is best else ""
+        low = money(s.all_time_low) + (" NEW" if s.is_new_low else "")
+        lines.append(
+            f"  {combo_label(s.result.depart, s.result.ret):<24}"
+            f"{money(s.current) if s.current is not None else 'none':>9}"
+            f"{change_text(s.change_since_last):>13}{change_text(s.change_since_start):>13}"
+            f"{low:>15}{mark}"
+        )
+    lines += ["  (* = cheapest)", ""]
+    return lines
+
+
+def render_digest(cfg: Config, statuses: list[ComboStatus], *, run_at: dt.datetime,
+                  slot: str, reasons: list[str], chart_png: bytes | None) -> Email:
+    # Each cabin is reported on its own: best fare, then a table of every date pair.
+    by_cabin = [(cabin, [s for s in statuses if s.result.cabin == cabin]) for cabin in cfg.cabin_classes]
+    bests = {cabin: best_nonstop(group) for cabin, group in by_cabin}
+    priced = [(cabin, b) for cabin, b in bests.items() if b is not None]
+    assert priced, "render_problem handles runs with no nonstop prices"
+    multi = len(cfg.cabin_classes) > 1
+
+    def label(r: ComboResult) -> str:
+        return result_label(r) if multi else combo_label(r.depart, r.ret)
+
+    local =run_at.astimezone(ZoneInfo(cfg.timezone))
+
+    tag = "PRICE DROP" if reasons else ("Daily digest" if slot == "morning" else "Update")
+    if multi:
+        prices = " · ".join(f"{cabin_name(c).lower()} {money(b.current)}" for c, b in priced)
+        subject = f"{tag}: {cfg.origin}→{cfg.destination} nonstop {prices}"
+    else:
+        b = priced[0][1]
+        subject = (f"{tag}: {cfg.origin}→{cfg.destination} nonstop from {money(b.current)} "
+                   f"({combo_label(b.result.depart, b.result.ret)})")
+
+    connecting = [
+        s for s in statuses
+        if connecting_worth_listing(s.result.nonstop, s.result.overall, cfg.connecting_min_saving)
+    ]
+    errors = [(s.result, e) for s in statuses for e in s.result.errors]
+
+    # ---- HTML
+    alert_html = ""
+    if reasons:
+        items = "".join(f"<li>{escape(r)}</li>" for r in reasons)
+        alert_html = f"""<tr><td style="padding:8px 24px 0">
+  <div style="border-left:4px solid {DOWN};background:#eef7f0;padding:10px 14px;border-radius:4px;font-size:14px">
+    <strong>Price drop</strong><ul style="margin:6px 0 0;padding-left:18px">{items}</ul></div>
+</td></tr>"""
+
+    cabin_html = "".join(_cabin_section_html(cabin, group, bests[cabin], multi) for cabin, group in by_cabin)
 
     connecting_html = ""
     if connecting:
@@ -202,7 +266,7 @@ def render_digest(cfg: Config, statuses: list[ComboStatus], *, run_at: dt.dateti
             saving = s.result.nonstop.price - o.price
             ol, bl = itinerary_lines(o)
             blocks.append(f"""<div style="padding:10px 0;border-top:1px solid {RULE};font-size:14px;line-height:1.5">
-  <strong>{escape(combo_label(s.result.depart, s.result.ret))}: {money(o.price)}</strong>
+  <strong>{escape(label(s.result))}: {money(o.price)}</strong>
   <span style="color:{DOWN};font-weight:600">({money(saving)} less than nonstop)</span><br>
   <span style="color:{INK_2}">{escape(o.airline)} · {escape(o.stops_label)}{' · self-transfer' if o.self_transfer else ''}<br>
   {escape(ol)}<br>{escape(bl)}</span><br>
@@ -219,7 +283,7 @@ def render_digest(cfg: Config, statuses: list[ComboStatus], *, run_at: dt.dateti
     if chart_png:
         chart_html = f"""<tr><td style="padding:0 24px 20px">
   <div style="font-size:16px;font-weight:700;padding-bottom:8px">Cheapest nonstop over time</div>
-  <img src="cid:{CHART_CID}" width="560" alt="Line chart of the cheapest nonstop price at each check"
+  <img src="cid:{CHART_CID}" width="560" alt="Line chart of the cheapest nonstop price per cabin at each check"
        style="width:100%;max-width:560px;height:auto;display:block;border:0">
 </td></tr>"""
         attachments.append({
@@ -231,56 +295,38 @@ def render_digest(cfg: Config, statuses: list[ComboStatus], *, run_at: dt.dateti
 
     footer_bits = [
         f"Checked {local:%a %d %b %Y, %H:%M} UK time ({slot} run). "
-        f"Prices are as quoted by Ignav for {escape(cfg.passenger_summary)}, {escape(cfg.cabin_class)}, in {escape(cfg.currency)}. "
+        f"Prices are as quoted by Ignav for {escape(cfg.passenger_summary)}, "
+        f"{escape(cfg.cabin_summary.lower())}, in {escape(cfg.currency)}. "
         "Fares change constantly; confirm the price on the booking page."
     ]
     if errors:
         err_items = "".join(
-            f"<li>{escape(combo_label(r.depart, r.ret))}: {escape(e)}</li>" for r, e in errors)
+            f"<li>{escape(label(r))}: {escape(e)}</li>" for r, e in errors)
         footer_bits.append(f'Some searches had problems:<ul style="margin:4px 0;padding-left:18px">{err_items}</ul>')
-    html = _shell(cfg, subject, alert_html + hero + table + connecting_html + chart_html,
+    html = _shell(cfg, subject, alert_html + cabin_html + connecting_html + chart_html,
                   "<br>".join(footer_bits))
 
     # ---- plain text
     lines = []
     if reasons:
         lines += ["PRICE DROP", *[f"  - {r}" for r in reasons], ""]
-    lines += [
-        f"{cfg.origin} -> {cfg.destination} | {cfg.passenger_summary} | {cfg.cabin_class}",
-        "",
-        f"BEST NONSTOP RIGHT NOW: {money(opt.price)}  {label} 2027",
-        f"  {opt.airline}",
-        f"  {out_line}",
-        f"  {back_line}",
-        f"  Book: {opt.booking_url or 'no booking link returned'}",
-        "",
-        "ALL DATES (nonstop)",
-        f"  {'Dates':<24}{'Now':>9}{'Since last':>13}{'Since start':>13}{'All-time low':>15}",
-    ]
-    for s in statuses:
-        mark = " *" if s is best else ""
-        low = money(s.all_time_low) + (" NEW" if s.is_new_low else "")
-        lines.append(
-            f"  {combo_label(s.result.depart, s.result.ret):<24}"
-            f"{money(s.current) if s.current is not None else 'none':>9}"
-            f"{change_text(s.change_since_last):>13}{change_text(s.change_since_start):>13}"
-            f"{low:>15}{mark}"
-        )
-    lines.append("  (* = cheapest)")
+    lines += [f"{cfg.origin} -> {cfg.destination} | {cfg.passenger_summary} | {cfg.cabin_summary}", ""]
+    for cabin, group in by_cabin:
+        lines += _cabin_section_text(cabin, group, bests[cabin], multi)
     if connecting:
-        lines += ["", f"CONNECTING OPTIONS (at least {money(cfg.connecting_min_saving)} cheaper than nonstop)"]
+        lines += [f"CONNECTING OPTIONS (at least {money(cfg.connecting_min_saving)} cheaper than nonstop)"]
         for s in connecting:
             o = s.result.overall
             ol, bl = itinerary_lines(o)
             lines += [
-                f"  {combo_label(s.result.depart, s.result.ret)}: {money(o.price)} "
+                f"  {label(s.result)}: {money(o.price)} "
                 f"({money(s.result.nonstop.price - o.price)} less), {o.airline}, {o.stops_label}",
                 f"    {ol}", f"    {bl}", f"    Book: {o.booking_url or 'n/a'}",
             ]
     lines += ["", f"Checked {local:%a %d %b %Y, %H:%M} UK time ({slot} run)."]
     if errors:
         lines += ["Some searches had problems:"] + [
-            f"  - {combo_label(r.depart, r.ret)}: {e}" for r, e in errors]
+            f"  - {label(r)}: {e}" for r, e in errors]
 
     return Email(subject=subject, html=html, text="\n".join(lines), attachments=attachments)
 
@@ -294,7 +340,8 @@ def render_problem(cfg: Config, results: list[ComboResult], *, run_at: dt.dateti
     details = []
     for r in results:
         msg = "; ".join(r.errors) or "searches succeeded but returned no nonstop round trips"
-        details.append((combo_label(r.depart, r.ret), msg))
+        label = result_label(r) if len(cfg.cabin_classes) > 1 else combo_label(r.depart, r.ret)
+        details.append((label, msg))
 
     summary = (f"The {slot} check at {local:%H:%M} UK time on {local:%a %d %b} got no nonstop "
                "prices for any of the date combinations, so there is no digest this time.")

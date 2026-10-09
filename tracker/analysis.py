@@ -6,9 +6,10 @@ import datetime as dt
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
+from tracker.config import cabin_name
 from tracker.models import ComboResult, FlightOption
 
-History = dict[tuple[str, str], list[tuple[str, float]]]
+History = dict[tuple[str, str, str], list[tuple[str, float]]]
 
 
 @dataclass
@@ -74,7 +75,7 @@ def alert_reasons(statuses: list[ComboStatus], drop_threshold: float) -> list[st
     """Reasons that justify a PRICE DROP email. Empty list means no alert."""
     reasons = []
     for s in statuses:
-        label = combo_label(s.result.depart, s.result.ret)
+        label = result_label(s.result)
         if s.dropped_by(drop_threshold):
             reasons.append(f"{label}: down £{-s.change_since_last:,.0f} since last check")
         if s.is_new_low:
@@ -101,22 +102,39 @@ def should_send(slot: str, problem: bool, reasons: list[str], force: bool) -> bo
     return bool(reasons)
 
 
-def chart_series(history: History, tz: str) -> list[tuple[dt.datetime, float]]:
-    """Cheapest nonstop price across all combos at each run, oldest first."""
-    by_run: dict[str, float] = {}
-    for points in history.values():
-        for ts, price in points:
-            by_run[ts] = min(price, by_run.get(ts, price))
+Series = list[tuple[dt.datetime, float]]
+
+
+def chart_series(history: History, tz: str, cabins: list[str]) -> dict[str, Series]:
+    """Per cabin, the cheapest nonstop price across all combos at each run, oldest first.
+
+    Cabins are kept in the given order; ones with no history are left out.
+    """
     zone = ZoneInfo(tz)
-    return [
-        (dt.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc).astimezone(zone), price)
-        for ts, price in sorted(by_run.items())
-    ]
+    out: dict[str, Series] = {}
+    for cabin in cabins:
+        by_run: dict[str, float] = {}
+        for (key_cabin, _, _), points in history.items():
+            if key_cabin != cabin:
+                continue
+            for ts, price in points:
+                by_run[ts] = min(price, by_run.get(ts, price))
+        if by_run:
+            out[cabin] = [
+                (dt.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc).astimezone(zone), price)
+                for ts, price in sorted(by_run.items())
+            ]
+    return out
 
 
-def distinct_days(series: list[tuple[dt.datetime, float]]) -> int:
-    return len({when.date() for when, _ in series})
+def distinct_days(series: dict[str, Series]) -> int:
+    return len({when.date() for points in series.values() for when, _ in points})
 
 
 def combo_label(depart: dt.date, ret: dt.date) -> str:
     return f"{depart:%a} {depart.day} {depart:%b} → {ret:%a} {ret.day} {ret:%b}"
+
+
+def result_label(r: ComboResult) -> str:
+    """Cabin plus dates, for places that mix cabins (alerts, errors)."""
+    return f"{cabin_name(r.cabin)} · {combo_label(r.depart, r.ret)}"

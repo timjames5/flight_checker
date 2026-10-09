@@ -76,7 +76,7 @@ class FakeClient:
         self.fail_links = fail_links
         self.link_calls = []
 
-    def round_trip(self, depart, ret, max_stops):
+    def round_trip(self, depart, ret, max_stops, cabin="economy"):
         resp = self.responses[max_stops]
         if isinstance(resp, Exception):
             raise resp

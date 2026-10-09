@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+CABIN_CLASSES = ("economy", "premium_economy", "business", "first")
+
 
 @dataclass(frozen=True)
 class Config:
@@ -17,7 +19,7 @@ class Config:
     return_dates: list[dt.date]
     adults: int
     children: int
-    cabin_class: str
+    cabin_classes: list[str]
     market: str
     currency: str
     evening_drop_threshold: float
@@ -50,6 +52,27 @@ class Config:
             parts.append(f"{self.children} child{'ren' if self.children != 1 else ''}")
         return " + ".join(parts)
 
+    @property
+    def cabin_summary(self) -> str:
+        return " + ".join(cabin_name(c) for c in self.cabin_classes)
+
+
+def cabin_name(cabin: str) -> str:
+    """'premium_economy' -> 'Premium economy'."""
+    return cabin.replace("_", " ").capitalize()
+
+
+def _cabins(trip: dict) -> list[str]:
+    """cabin_classes as a list; the older single cabin_class key still works."""
+    value = trip.get("cabin_classes", trip.get("cabin_class", "economy"))
+    cabins = [value] if isinstance(value, str) else list(value)
+    for c in cabins:
+        if c not in CABIN_CLASSES:
+            raise ValueError(f"config.yaml: unknown cabin class {c!r}; use one of {', '.join(CABIN_CLASSES)}")
+    if not cabins or len(set(cabins)) != len(cabins):
+        raise ValueError("config.yaml: cabin_classes must list at least one cabin, without repeats")
+    return cabins
+
 
 def _date(value) -> dt.date:
     if isinstance(value, dt.date):
@@ -73,7 +96,7 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         return_dates=[_date(d) for d in trip["return_dates"]],
         adults=int(trip.get("adults", 1)),
         children=int(trip.get("children", 0)),
-        cabin_class=trip.get("cabin_class", "economy"),
+        cabin_classes=_cabins(trip),
         market=trip.get("market", "GB"),
         currency=trip.get("currency", "GBP"),
         evening_drop_threshold=float(alerts.get("evening_drop_threshold", 25)),

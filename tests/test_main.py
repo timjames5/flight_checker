@@ -23,7 +23,7 @@ def test_mock_runs_record_history_and_evening_stays_quiet_without_drop(tmp_path,
 
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
-        assert conn.execute("SELECT COUNT(*) FROM quotes").fetchone()[0] == 12  # 6 combos x 2 kinds
+        assert conn.execute("SELECT COUNT(*) FROM quotes").fetchone()[0] == 24  # 2 cabins x 6 combos x 2 kinds
 
     # Same mock tick again: identical prices, so an evening run sends nothing.
     assert main(base + ["--slot", "evening", "--now", "2026-10-02T06:10:00Z"]) == 0
