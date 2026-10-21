@@ -52,6 +52,8 @@ class IgnavClient:
         }
         if max_stops is not None:
             body["max_stops"] = max_stops
+        if self.cfg.min_checked_bags:
+            body["min_checked_bags"] = self.cfg.min_checked_bags
         return self._post("/fares/round-trip", body)
 
     def booking_links(self, ignav_id: str) -> dict:

@@ -19,6 +19,7 @@ class Config:
     return_dates: list[dt.date]
     adults: int
     children: int
+    min_checked_bags: int
     cabin_classes: list[str]
     market: str
     currency: str
@@ -96,6 +97,7 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         return_dates=[_date(d) for d in trip["return_dates"]],
         adults=int(trip.get("adults", 1)),
         children=int(trip.get("children", 0)),
+        min_checked_bags=int(trip.get("min_checked_bags", 0)),
         cabin_classes=_cabins(trip),
         market=trip.get("market", "GB"),
         currency=trip.get("currency", "GBP"),

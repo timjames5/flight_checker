@@ -6,13 +6,14 @@ trip:
   destination: ATL
   # Every outbound date is paired with every return date (3 x 2 = 6 round trips).
   # Keep dates quoted so YAML treats them as strings.
-  outbound_dates: ["2027-08-16", "2027-08-17", "2027-08-18"]
-  return_dates: ["2027-08-31", "2027-09-01"]
+  outbound_dates: ["2027-08-16", "2027-08-17", "2027-08-18", "2027-08-19"]
+  return_dates: ["2027-08-31", "2027-09-01", "2027-09-02", "2027-09-03"]
   adults: 3
   children: 1          # ages 2-11 count as children for Ignav
+  min_checked_bags: 1  # only fares that include at least this many checked bags (0 = no filter)
   # Each cabin is searched and tracked separately, so every cabin added
   # multiplies the searches per run. Options: economy | premium_economy | business | first
-  cabin_classes: [economy, premium_economy]
+  cabin_classes: [economy]
   market: GB           # GB market returns prices in GBP
   currency: GBP
 
